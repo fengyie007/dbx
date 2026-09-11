@@ -560,6 +560,31 @@ UNIQUE KEY(`tenant_id`, `name``part`)
         assert!(indexes[1].is_unique);
     }
 
+    #[test]
+    fn doris_create_table_ddl_index_parser_reads_ann_index_type_before_properties() {
+        // Doris 4.0 vector (ANN) and inverted indexes carry a PROPERTIES(...) clause
+        // after USING; the index kind must still be read from the USING keyword.
+        let ddl = r#"
+CREATE TABLE `docs` (
+  `id` bigint NOT NULL,
+  `embedding` array<float> NOT NULL,
+  INDEX idx_embedding (`embedding`) USING ANN PROPERTIES("index_type" = "hnsw", "metric_type" = "l2_distance", "dim" = "768") COMMENT 'vector index',
+  INDEX idx_title (`title`) USING INVERTED PROPERTIES("parser" = "english")
+) ENGINE=OLAP
+DUPLICATE KEY(`id`)
+"#;
+
+        let indexes = indexes_from_create_table_ddl(ddl);
+
+        assert_eq!(indexes.len(), 2);
+        assert_eq!(indexes[0].name, "idx_embedding");
+        assert_eq!(indexes[0].columns, vec!["embedding"]);
+        assert_eq!(indexes[0].index_type.as_deref(), Some("ANN"));
+        assert_eq!(indexes[0].comment.as_deref(), Some("vector index"));
+        assert_eq!(indexes[1].index_type.as_deref(), Some("INVERTED"));
+        assert_eq!(indexes[1].comment, None);
+    }
+
     fn catalog_info(name: &str, catalog_type: &str, is_current: bool) -> crate::db::CatalogInfo {
         crate::db::CatalogInfo {
             name: name.to_string(),

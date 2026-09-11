@@ -925,6 +925,51 @@ fn doris_single_column_alter_renames_then_modifies_column_definition() {
 }
 
 #[test]
+fn doris_index_changes_use_doris_index_grammar() {
+    let mut dropped = existing_index("idx_old", &["org_code"], false);
+    dropped.marked_for_drop = true;
+    let mut inverted = index("idx_org_name", &["org_name"]);
+    inverted.index_type = "inverted".to_string();
+    inverted.comment = "full-text".to_string();
+    // ANN is the Doris 4.0 vector index.
+    let mut ann = index("idx_embedding", &["embedding"]);
+    ann.index_type = "ANN".to_string();
+
+    let mut options = index_change_options(DatabaseType::Doris, None, dropped);
+    options.table_name = "orders".to_string();
+    options.indexes.extend([inverted, ann]);
+    let result = build_table_structure_change_sql(options);
+
+    assert_eq!(result.warnings, Vec::<String>::new());
+    assert_eq!(
+        result.statements,
+        vec![
+            "DROP INDEX `idx_old` ON `orders`;",
+            "CREATE INDEX `idx_org_name` ON `orders` (`org_name`) USING INVERTED COMMENT 'full-text';",
+            "CREATE INDEX `idx_embedding` ON `orders` (`embedding`) USING ANN;",
+        ]
+    );
+}
+
+#[test]
+fn doris_unique_and_mysql_index_types_degrade_with_warnings() {
+    let mut unique = index("uniq_email", &["email"]);
+    unique.is_unique = true;
+    unique.index_type = "BTREE".to_string();
+
+    let result = build_table_structure_change_sql(index_change_options(DatabaseType::Doris, None, unique));
+
+    assert_eq!(result.statements, vec!["CREATE INDEX `uniq_email` ON `USERS` (`email`);"]);
+    assert_eq!(
+        result.warnings,
+        vec![
+            "Doris does not support unique indexes; index \"uniq_email\" is created as a regular index (use a UNIQUE KEY table model for uniqueness).",
+            "Index type \"BTREE\" is not supported for Doris; index \"uniq_email\" uses the server default index type.",
+        ]
+    );
+}
+
+#[test]
 fn dameng_integer_column_omits_mysql_display_width() {
     let mut age = column("age");
     age.data_type = "integer(11)".to_string();

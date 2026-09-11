@@ -38,7 +38,7 @@ fn live_doris_config(id: &str) -> ConnectionConfig {
 }
 
 #[tokio::test]
-#[ignore = "requires DBX_TEST_DORIS_HOST/DBX_TEST_DORIS_PORT/DBX_TEST_DORIS_USER pointing at a writable Apache Doris 2.1.8 cluster"]
+#[ignore = "requires DBX_TEST_DORIS_HOST/DBX_TEST_DORIS_PORT/DBX_TEST_DORIS_USER pointing at a writable Apache Doris cluster (2.1 through 4.x)"]
 async fn doris_qualified_table_metadata_resolves_schema_database_with_comments() {
     let config = live_doris_config("doris-6590-live");
     let db_path = std::env::temp_dir().join(format!("dbx-doris-6590-{}.db", uuid::Uuid::new_v4().simple()));

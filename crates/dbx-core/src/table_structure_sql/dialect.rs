@@ -123,6 +123,8 @@ pub(super) fn capabilities_for(
             foreign_key: true,
             ..base
         },
+        // Doris secondary indexes (INVERTED / NGRAM_BF / BITMAP, plus ANN since 4.0)
+        // use their own `CREATE INDEX ... USING` grammar; see `doris_index_using_clause`.
         Some(DatabaseType::Doris) => TableStructureCapabilities {
             dialect: StructureDialect::Doris,
             add_column: true,
@@ -130,6 +132,11 @@ pub(super) fn capabilities_for(
             rename_column: true,
             alter_existing_column: true,
             comment: true,
+            create_index: true,
+            drop_index: true,
+            rebuild_index: true,
+            index_type: true,
+            index_comment: true,
             ..base
         },
         // GBase 8s is Informix-compatible, unlike the rest of the `Gbase`

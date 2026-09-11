@@ -884,6 +884,10 @@ const columnEditorControls = computed(() => getColumnEditorControls(databaseType
 const indexTypesByDb: Record<string, string[]> = {
   postgres: ["BTREE", "HASH", "GIST", "SPGIST", "GIN", "BRIN"],
   mysql: ["BTREE", "HASH", "FULLTEXT", "SPATIAL", "RTREE"],
+  // Doris shares the MySQL structure dialect but its secondary indexes are not
+  // B-trees: inverted (default), n-gram bloom filter, the ANN vector index
+  // (Doris 4.0+) and the deprecated bitmap index.
+  doris: ["INVERTED", "NGRAM_BF", "ANN", "BITMAP"],
   sqlserver: ["CLUSTERED", "NONCLUSTERED", "COLUMNSTORE", "NONCLUSTERED COLUMNSTORE", "XML", "SPATIAL"],
   oracle: ["NORMAL", "BITMAP", "FUNCTION-BASED NORMAL", "FUNCTION-BASED DOMAIN", "DOMAIN", "CLUSTER"],
   sqlite: ["BTREE"],
@@ -894,8 +898,10 @@ const indexTypeOptions = computed(() => {
   if (connection.value?.driver_profile?.toLowerCase() === "gaussdb-m") {
     return indexTypesByDb["gaussdb-m"];
   }
+  if (databaseType.value === "doris") return indexTypesByDb.doris ?? [];
   return indexTypesByDb[structureDialect.value] ?? [];
 });
+const defaultIndexTypeOption = computed(() => (databaseType.value === "doris" ? "INVERTED" : "BTREE"));
 
 interface DefaultValuePreset {
   label: string;
@@ -4839,7 +4845,7 @@ watch(
                     </label>
                   </td>
                   <td :class="structureCellClass">
-                    <Select v-if="indexTypeOptions.length > 0" :model-value="index.indexType || 'BTREE'" :disabled="!canEditIndexDraft(index)" @update:model-value="(v: any) => (index.indexType = String(v ?? ''))">
+                    <Select v-if="indexTypeOptions.length > 0" :model-value="index.indexType || defaultIndexTypeOption" :disabled="!canEditIndexDraft(index)" @update:model-value="(v: any) => (index.indexType = String(v ?? ''))">
                       <SelectTrigger class="structure-grid-control h-[var(--structure-control-height)] w-full rounded-[6px] px-[var(--structure-control-px)] font-mono text-[length:var(--structure-font-size)] focus-visible:border-ring/50 focus-visible:ring-1 focus-visible:ring-ring/25">
                         <SelectValue />
                       </SelectTrigger>
