@@ -18,14 +18,14 @@ export function normalizeDorisKeyModel(value: string | undefined): DorisKeyModel
 }
 
 /** Parses the replicas input: a positive integer, or `undefined` for "cluster default". */
-export function parseDorisReplicationNum(value: string): number | undefined {
-  const trimmed = value.trim();
+export function parseDorisReplicationNum(value: string | number | undefined): number | undefined {
+  const trimmed = String(value ?? "").trim();
   if (!/^\d+$/.test(trimmed)) return undefined;
   const parsed = Number.parseInt(trimmed, 10);
   return parsed > 0 ? parsed : undefined;
 }
 
-export function dorisTableSqlOption(keyModel: string, replicationNum: string, supported: boolean): DorisTableOptions | undefined {
+export function dorisTableSqlOption(keyModel: string, replicationNum: string | number | undefined, supported: boolean): DorisTableOptions | undefined {
   if (!supported) return undefined;
   return { keyModel: normalizeDorisKeyModel(keyModel), replicationNum: parseDorisReplicationNum(replicationNum) };
 }

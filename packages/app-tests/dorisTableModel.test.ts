@@ -15,7 +15,9 @@ test("normalizes the Doris key model and replica count", () => {
   assert.equal(normalizeDorisKeyModel("primary"), "DUPLICATE");
   assert.equal(normalizeDorisKeyModel(undefined), "DUPLICATE");
   assert.equal(parseDorisReplicationNum("3"), 3);
+  assert.equal(parseDorisReplicationNum(3), 3);
   assert.equal(parseDorisReplicationNum(" 1 "), 1);
+  assert.equal(parseDorisReplicationNum(undefined), undefined);
   assert.equal(parseDorisReplicationNum("0"), undefined);
   assert.equal(parseDorisReplicationNum("abc"), undefined);
   assert.equal(parseDorisReplicationNum(""), undefined);

@@ -127,7 +127,6 @@ pub(super) fn capabilities_for(
         // use their own `CREATE INDEX ... USING` grammar; see `doris_index_using_clause`.
         Some(DatabaseType::Doris) => TableStructureCapabilities {
             dialect: StructureDialect::Doris,
-            create_table: true,
             add_column: true,
             drop_column: true,
             rename_column: true,

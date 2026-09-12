@@ -1448,7 +1448,7 @@ function restoreDraft(draft: TableStructureEditorDraft) {
   mysqlTableEngine.value = draft.mysqlTableEngine || "";
   originalMysqlTableEngine.value = draft.originalMysqlTableEngine || "";
   dorisKeyModel.value = normalizeDorisKeyModel(draft.dorisKeyModel);
-  dorisReplicationNum.value = draft.dorisReplicationNum || "";
+  dorisReplicationNum.value = String(draft.dorisReplicationNum ?? "");
   tableOwner.value = draft.tableOwner || "";
   originalTableOwner.value = draft.originalTableOwner || "";
   columns.value = cloneDraftValue(draft.columns || []);
@@ -1536,7 +1536,7 @@ function hasPendingStructureChanges(): boolean {
       !!newTableName.value.trim() ||
       !!tableComment.value.trim() ||
       mysqlTableEngine.value !== originalMysqlTableEngine.value ||
-      (supportsDorisTableModel.value && (dorisKeyModel.value !== DORIS_DEFAULT_KEY_MODEL || !!dorisReplicationNum.value.trim())) ||
+      (supportsDorisTableModel.value && (dorisKeyModel.value !== DORIS_DEFAULT_KEY_MODEL || !!String(dorisReplicationNum.value ?? "").trim())) ||
       columns.value.length > 0 ||
       indexes.value.length > 0 ||
       foreignKeys.value.length > 0 ||
@@ -4217,7 +4217,17 @@ watch(
         </SelectContent>
       </Select>
       <label class="shrink-0 font-medium text-muted-foreground">{{ t("structureEditor.dorisReplicationNum") }}</label>
-      <Input v-model="dorisReplicationNum" type="number" min="1" step="1" :placeholder="t('structureEditor.dorisReplicationNumPlaceholder')" :class="[structureMonoControlClass, 'w-[120px]']" :disabled="saving" data-doris-replication-num-input />
+      <Input
+        :model-value="dorisReplicationNum"
+        type="number"
+        min="1"
+        step="1"
+        :placeholder="t('structureEditor.dorisReplicationNumPlaceholder')"
+        :class="[structureMonoControlClass, 'w-[120px]']"
+        :disabled="saving"
+        data-doris-replication-num-input
+        @update:model-value="(v: any) => (dorisReplicationNum = String(v ?? ''))"
+      />
     </div>
 
     <div v-if="supportsTableOwner" class="flex shrink-0 items-center gap-2">
