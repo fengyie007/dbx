@@ -50,6 +50,7 @@ fn change_options(table_name: &str, columns: Vec<EditableStructureColumn>) -> Ta
         mysql_engine: None,
         partitioned: false,
         is_gaussdb_m_mode: false,
+        doris_table: None,
         table_collation: None,
     }
 }

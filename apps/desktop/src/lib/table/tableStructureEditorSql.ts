@@ -14,6 +14,8 @@ export interface ColumnExtra {
   manticoreStored?: boolean;
   manticoreAttribute?: boolean;
   manticoreSecondaryIndex?: boolean;
+  /** Doris AGGREGATE KEY tables: aggregation type of a value column (`SUM`, `REPLACE`, ...). */
+  dorisAggregationType?: string;
 }
 
 export interface EditableStructureColumn {
@@ -75,6 +77,13 @@ export interface EditableStructureTrigger {
   markedForDrop: boolean;
 }
 
+/** Doris table model chosen while creating a table (`DUPLICATE` / `UNIQUE` / `AGGREGATE` KEY). */
+export interface DorisTableOptions {
+  keyModel: string;
+  /** `PROPERTIES ("replication_num" = "n")`; omitted keeps the cluster default. */
+  replicationNum?: number;
+}
+
 export interface BuildTableStructureChangeSqlOptions {
   databaseType?: DatabaseType;
   /** Driver profile reported by the connection (e.g. `"gbase8s"`). GBase 8s is
@@ -94,6 +103,8 @@ export interface BuildTableStructureChangeSqlOptions {
    * matches it inherit the table default, so the backend leaves their redundant
    * `CHARACTER SET`/`COLLATE` clauses out of the generated DDL. */
   tableCollation?: string;
+  /** Doris only: table model and replicas for CREATE TABLE; ignored by other dialects. */
+  dorisTable?: DorisTableOptions;
   /** The target table is a PostgreSQL partitioned parent (`relkind = 'p'`);
    * the backend rejects `CREATE INDEX CONCURRENTLY` on such tables (fail
    * closed) instead of downgrading to a blocking `CREATE INDEX`. */

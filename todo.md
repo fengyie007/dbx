@@ -1,4 +1,15 @@
 1、增加对doris4.x数据库的支持。 ✅ 已完成（2026-09-12）
+2、Doris 建表支持 DUPLICATE / UNIQUE / AGGREGATE KEY 表模型。 ✅ 已完成（2026-09-12）
+
+## 任务2 修改内容
+
+此前 Doris 建表沿用通用逻辑，会输出 Doris 不认识的 `PRIMARY KEY (...)`，也没有列注释和分布子句，实际无法建表。本次：
+
+- 表结构编辑器（仅 Doris 新建模式）新增“表模型”下拉（DUPLICATE / UNIQUE / AGGREGATE KEY）和“副本数”输入框；“主键”列在 Doris 下显示为“Key 列”，勾选的列即 key 列。选择 AGGREGATE 时列表新增“聚合类型”列（SUM/MAX/MIN/REPLACE/REPLACE_IF_NOT_NULL/HLL_UNION/BITMAP_UNION/QUANTILE_UNION）。
+- 生成的 DDL：`CREATE TABLE t (...) ENGINE=OLAP <模型> KEY(k...) [COMMENT] DISTRIBUTED BY HASH(k...) BUCKETS AUTO [PROPERTIES("replication_num"="n")]`；没有 key 列的 DUPLICATE 表使用 `DISTRIBUTED BY RANDOM BUCKETS AUTO`；副本数留空则不输出 PROPERTIES（用集群默认）。
+- 校验（直接报错，不自动改顺序）：key 列必须是最前面的连续列；float/double/string/text/json/variant/array/map/struct/bitmap/hll 等不能做 key；UNIQUE/AGGREGATE 至少一个 key 列；AGGREGATE 的每个 value 列必须有聚合类型；副本数 ≥ 1。
+- 涉及文件：`crates/dbx-core/src/table_structure_sql/{doris_table.rs（新增）, create_table.rs, types.rs, dialect.rs, tests.rs}`、`apps/desktop/src/lib/table/{dorisTableModel.ts（新增）, tableStructureEditorSql.ts}`、`apps/desktop/src/components/structure/TableStructureEditor.vue`、`apps/desktop/src/types/database.ts`、9 个 locale 文件、`packages/app-tests/dorisTableModel.test.ts`（新增）。
+- 未做：编辑已有表时展示表模型（需解析 SHOW CREATE TABLE）、分区（PARTITION BY）配置。
 
 ## 任务1 修改内容
 

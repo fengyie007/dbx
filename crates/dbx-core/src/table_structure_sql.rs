@@ -4,6 +4,7 @@ mod columns;
 mod comments;
 mod create_table;
 mod dialect;
+mod doris_table;
 mod foreign_keys;
 mod indexes;
 mod mysql_engine;
