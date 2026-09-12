@@ -5,6 +5,7 @@ use super::column_format::{
 };
 use super::comments::{build_sqlserver_column_comment_sql, build_sqlserver_table_comment_sql};
 use super::dialect::{capabilities_for, database_label, StructureDialect};
+use super::doris_table::{doris_column_aggregation_clause, doris_key_model, doris_table_tail, validate_doris_table};
 use super::foreign_keys::build_foreign_key_sql_for_new_table;
 use super::indexes::build_create_index_statements;
 use super::mysql_engine::{append_mysql_table_option, validate_mysql_engine};
@@ -50,10 +51,14 @@ pub fn build_create_table_sql(mut options: TableStructureSqlOptions) -> TableStr
     }
     validate_columns(&active_columns, &mut warnings);
     validate_dameng_identity(&options, &active_columns, &mut warnings);
+    if dialect == StructureDialect::Doris {
+        validate_doris_table(&options, &active_columns, &mut warnings);
+    }
     if !warnings.is_empty() {
         return TableStructureSqlResult { statements: Vec::new(), warnings };
     }
     let table = qualified_new_table(options.database_type, dialect, options.schema.as_deref(), &options.table_name);
+    let key_model = if dialect == StructureDialect::Doris { doris_key_model(&options) } else { String::new() };
     if dialect == StructureDialect::Dameng {
         for column in &active_columns {
             if has_dameng_identity(column) && !is_dameng_identity_compatible_type(&column.data_type) {
@@ -102,6 +107,9 @@ pub fn build_create_table_sql(mut options: TableStructureSqlOptions) -> TableStr
             data_type = "INTEGER".to_string();
         }
         let mut parts = vec![quote_new_ident(options.database_type, dialect, &column.name), data_type];
+        if let Some(aggregation) = doris_column_aggregation_clause(&key_model, column) {
+            parts.push(aggregation);
+        }
         if options.database_type == Some(DatabaseType::Mysql) && is_mysql_character_data_type(&column.data_type) {
             if !column.character_set.trim().is_empty() {
                 parts.push(format!("CHARACTER SET {}", quote_ident(dialect, &column.character_set)));
@@ -110,13 +118,15 @@ pub fn build_create_table_sql(mut options: TableStructureSqlOptions) -> TableStr
                 parts.push(format!("COLLATE {}", quote_ident(dialect, &column.collation)));
             }
         }
+        // Doris has no PRIMARY KEY clause, so its key columns keep an explicit NOT NULL.
+        let implicit_not_null = column.is_primary_key && dialect != StructureDialect::Doris;
         if dialect == StructureDialect::Sqlite
-            && column.is_primary_key
+            && implicit_not_null
             && column.extra.as_ref().is_some_and(|e| e.auto_increment.unwrap_or(false))
         {
             parts.push("PRIMARY KEY".to_string());
         } else if !column.is_nullable
-            && !column.is_primary_key
+            && !implicit_not_null
             && !matches!(dialect, StructureDialect::ClickHouse | StructureDialect::ManticoreSearch)
         {
             parts.push("NOT NULL".to_string());
@@ -139,7 +149,10 @@ pub fn build_create_table_sql(mut options: TableStructureSqlOptions) -> TableStr
                 parts.push(mysql_on_update_current_timestamp_clause(&column.data_type));
             }
         }
-        if dialect == StructureDialect::Mysql && capabilities.comment && !clean(&column.comment).is_empty() {
+        if matches!(dialect, StructureDialect::Mysql | StructureDialect::Doris)
+            && capabilities.comment
+            && !clean(&column.comment).is_empty()
+        {
             parts.push(format!("COMMENT {}", quote_string(&clean(&column.comment))));
         }
         column_definitions.push(parts.join(" "));
@@ -154,7 +167,7 @@ pub fn build_create_table_sql(mut options: TableStructureSqlOptions) -> TableStr
                     && column.extra.as_ref().is_some_and(|e| e.auto_increment.unwrap_or(false)))
         })
         .collect();
-    if !pk_columns.is_empty() {
+    if !pk_columns.is_empty() && dialect != StructureDialect::Doris {
         let pk_list = pk_columns
             .iter()
             .map(|column| quote_new_ident(options.database_type, dialect, &column.name))
@@ -163,7 +176,14 @@ pub fn build_create_table_sql(mut options: TableStructureSqlOptions) -> TableStr
         column_definitions.push(format!("PRIMARY KEY ({pk_list})"));
     }
 
-    statements.push(format!("CREATE TABLE {table} (\n  {}\n);", column_definitions.join(",\n  ")));
+    if dialect == StructureDialect::Doris {
+        let key_columns: Vec<String> =
+            pk_columns.iter().map(|column| quote_new_ident(options.database_type, dialect, &column.name)).collect();
+        let tail = doris_table_tail(&options, &key_model, &key_columns);
+        statements.push(format!("CREATE TABLE {table} (\n  {}\n) {tail};", column_definitions.join(",\n  ")));
+    } else {
+        statements.push(format!("CREATE TABLE {table} (\n  {}\n);", column_definitions.join(",\n  ")));
+    }
 
     if let Some(engine) = options.mysql_engine.as_deref().map(str::trim).filter(|engine| !engine.is_empty()) {
         if let Some(statement) = statements.last_mut() {

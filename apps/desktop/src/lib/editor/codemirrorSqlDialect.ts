@@ -194,6 +194,15 @@ const POSTGRES_BUILTINS = [
 
 const MYSQL_BUILTINS = ["ifnull", "date_format", "str_to_date", "date_add", "date_sub", "curdate", "curtime", "unix_timestamp", "from_unixtime", "group_concat", "concat_ws"].join(" ");
 
+// Apache Doris on top of the CodeMirror MySQL vocabulary: table-model / catalog /
+// index DDL words, Doris-only column types, and the Doris 4.0 search, vector and
+// AI builtins. Lowercase on purpose — SQLDialect looks words up by their lowercase
+// form, so mixed-case entries would never match.
+const DORIS_KEYWORDS = "aggregate duplicate distributed buckets properties rollup switch catalogs overwrite outfile refresh materialized inverted ngram_bf ann match_any match_all match_phrase match_phrase_prefix match_regexp frontends backends";
+const DORIS_TYPES = "largeint string text variant ipv4 ipv6 bitmap hll quantile_state agg_state datetimev2 decimalv3 jsonb array map struct";
+const DORIS_BUILTINS =
+  "search multi_match tokenize l2_distance l2_distance_approximate inner_product inner_product_approximate cosine_distance ai_classify ai_extract ai_filter ai_fixgrammar ai_generate ai_mask ai_sentiment ai_similarity ai_summarize ai_translate ai_agg embed bitmap_union bitmap_union_count bitmap_count to_bitmap hll_union_agg hll_cardinality hll_hash percentile_approx array_contains array_size explode json_parse variant_type date_trunc to_date";
+
 export function postgresKeywordSyntaxTerms(keywords: string): string {
   return keywords
     .split(/\s+/)
@@ -234,6 +243,7 @@ export function createDbxCodeMirrorSqlDialect(langSql: CodeMirrorSqlLanguageModu
   const isSqlServer = baseDialect === langSql.MSSQL;
   const isPlsql = baseDialect === langSql.PLSQL;
   const isClickHouse = databaseType === "clickhouse" || dialectName === "clickhouse";
+  const isDoris = databaseType === "doris";
   // StandardSQL.spec exposes no vocabulary, so every StandardSQL-based dialect
   // (generic JDBC, IRIS/Caché, H2, DB2, …) needs the reconstructed standard
   // keyword set — without it SELECT/WHERE/AND highlight as plain identifiers.
@@ -242,12 +252,15 @@ export function createDbxCodeMirrorSqlDialect(langSql: CodeMirrorSqlLanguageModu
   const baseTypes = isStandardSql ? STANDARD_SQL_TYPES : baseDialect.spec.types || "";
   const commonKeywords = isClickHouse ? DBX_COMMON_SQL_KEYWORDS.toLowerCase() : DBX_COMMON_SQL_KEYWORDS;
   const baseBuiltin = isSqlServer ? sqlServerBuiltinSyntaxTerms(baseDialect.spec.builtin || "") : baseDialect.spec.builtin || "";
+  const keywordTerms = [baseKeywords, commonKeywords, isClickHouse ? CLICKHOUSE_KEYWORDS : "", isPostgres ? POSTGRES_PLPGSQL_KEYWORDS : "", isSqlServer ? SQLSERVER_KEYWORDS : "", isDoris ? DORIS_KEYWORDS : ""];
+  const typeTerms = [baseTypes, isClickHouse ? CLICKHOUSE_TYPES : "", isPostgres ? POSTGRES_PLPGSQL_TYPES : "", isDoris ? DORIS_TYPES : ""];
+  const builtinTerms = [baseBuiltin, isClickHouse ? CLICKHOUSE_BUILTINS : "", isPostgres ? `${POSTGRES_BUILTINS} ${POSTGRES_PLPGSQL_BUILTIN}` : "", isMysql ? MYSQL_BUILTINS : "", isDoris ? DORIS_BUILTINS : "", driverProfileSqlBuiltinTerms(driverProfile)];
 
   return langSql.SQLDialect.define({
     ...baseDialect.spec,
-    keywords: [baseKeywords, commonKeywords, isClickHouse ? CLICKHOUSE_KEYWORDS : "", isPostgres ? POSTGRES_PLPGSQL_KEYWORDS : "", isSqlServer ? SQLSERVER_KEYWORDS : ""].filter(Boolean).join(" "),
-    types: [baseTypes, isClickHouse ? CLICKHOUSE_TYPES : "", isPostgres ? POSTGRES_PLPGSQL_TYPES : ""].filter(Boolean).join(" ") || undefined,
-    builtin: [baseBuiltin, isClickHouse ? CLICKHOUSE_BUILTINS : "", isPostgres ? `${POSTGRES_BUILTINS} ${POSTGRES_PLPGSQL_BUILTIN}` : "", isMysql ? MYSQL_BUILTINS : "", driverProfileSqlBuiltinTerms(driverProfile)].filter(Boolean).join(" ") || undefined,
+    keywords: keywordTerms.filter(Boolean).join(" "),
+    types: typeTerms.filter(Boolean).join(" ") || undefined,
+    builtin: builtinTerms.filter(Boolean).join(" ") || undefined,
     // T-SQL temp tables (#local / ##global) otherwise tokenize the leading
     // `#` as a parser error, breaking highlighting for the whole name. The
     // specialVar scanner natively handles the doubled prefix and already

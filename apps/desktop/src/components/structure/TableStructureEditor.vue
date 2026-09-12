@@ -40,6 +40,7 @@ import { type BuildTableStructureChangeSqlOptions, type EditableStructureColumn,
 import { buildMysqlAutoIncrementCounterStatement, canEditMysqlAutoIncrementCounter, refreshMysqlAutoIncrementCounterDraft } from "@/lib/table/mysqlAutoIncrementCounter";
 import { mysqlTableCollationSql, parseMysqlTableCollation } from "@/lib/table/mysqlTableCollation";
 import { MYSQL_STORAGE_ENGINES_SQL, mysqlTableEngineSql, mysqlTableEngineSqlOption, parseMysqlTableEngineMetadata, refreshMysqlTableEngineDraft, supportsMysqlTableEngine } from "@/lib/table/mysqlTableEngine";
+import { DORIS_AGGREGATION_TYPES, DORIS_DEFAULT_KEY_MODEL, DORIS_KEY_MODELS, dorisTableSqlOption, normalizeDorisKeyModel, supportsDorisTableModel as supportsDorisTableModelFor, type DorisKeyModel } from "@/lib/table/dorisTableModel";
 import { PRESET_FIELDS_TEMPLATE_ID, createTableColumnTemplateDrafts } from "@/lib/table/tableColumnTemplates";
 import { getMysqlDataTypeHelp } from "@/lib/table/mysqlDataTypeHelp";
 import { getPostgresDataTypeHelp, gaussdbMTypeDisplayName } from "@/lib/table/postgresDataTypeHelp";
@@ -884,6 +885,10 @@ const columnEditorControls = computed(() => getColumnEditorControls(databaseType
 const indexTypesByDb: Record<string, string[]> = {
   postgres: ["BTREE", "HASH", "GIST", "SPGIST", "GIN", "BRIN"],
   mysql: ["BTREE", "HASH", "FULLTEXT", "SPATIAL", "RTREE"],
+  // Doris shares the MySQL structure dialect but its secondary indexes are not
+  // B-trees: inverted (default), n-gram bloom filter, the ANN vector index
+  // (Doris 4.0+) and the deprecated bitmap index.
+  doris: ["INVERTED", "NGRAM_BF", "ANN", "BITMAP"],
   sqlserver: ["CLUSTERED", "NONCLUSTERED", "COLUMNSTORE", "NONCLUSTERED COLUMNSTORE", "XML", "SPATIAL"],
   oracle: ["NORMAL", "BITMAP", "FUNCTION-BASED NORMAL", "FUNCTION-BASED DOMAIN", "DOMAIN", "CLUSTER"],
   sqlite: ["BTREE"],
@@ -894,8 +899,10 @@ const indexTypeOptions = computed(() => {
   if (connection.value?.driver_profile?.toLowerCase() === "gaussdb-m") {
     return indexTypesByDb["gaussdb-m"];
   }
+  if (databaseType.value === "doris") return indexTypesByDb.doris ?? [];
   return indexTypesByDb[structureDialect.value] ?? [];
 });
+const defaultIndexTypeOption = computed(() => (databaseType.value === "doris" ? "INVERTED" : "BTREE"));
 
 interface DefaultValuePreset {
   label: string;
@@ -961,6 +968,13 @@ const defaultValuePresets = computed((): DefaultValuePreset[] => {
 
 const showExtendedProperties = computed(() => supportsTableStructureExtendedProperties(databaseType.value));
 const showCharacterSet = computed(() => structureDialect.value === "mysql");
+// Doris table model (DUPLICATE / UNIQUE / AGGREGATE KEY): chosen only while
+// creating a table, immutable afterwards. AGGREGATE adds a per-column
+// aggregation-type column to the grid.
+const dorisKeyModel = ref<DorisKeyModel>(DORIS_DEFAULT_KEY_MODEL);
+const dorisReplicationNum = ref("");
+const supportsDorisTableModel = computed(() => supportsDorisTableModelFor(databaseType.value, !props.tableName));
+const showDorisAggregationType = computed(() => supportsDorisTableModel.value && dorisKeyModel.value === "AGGREGATE");
 
 const serverCharsetMetadata = ref<CreateDatabaseCharsetMetadata>();
 const charsetMetadataLoading = ref(false);
@@ -1068,7 +1082,9 @@ const colLabels = computed(() => {
   ];
   if (columnEditorControls.value.length) labels.push({ key: "length", label: t("structureEditor.length"), widthIndex: 3 });
   if (columnEditorControls.value.nullable) labels.push({ key: "nullable", label: t("structureEditor.nullable"), widthIndex: 4 });
-  if (columnEditorControls.value.primaryKey) labels.push({ key: "primaryKey", label: t("structureEditor.primaryKey"), widthIndex: 5 });
+  if (columnEditorControls.value.primaryKey) labels.push({ key: "primaryKey", label: supportsDorisTableModel.value ? t("structureEditor.dorisKeyColumn") : t("structureEditor.primaryKey"), widthIndex: 5 });
+  // Shares the default-value column width; the width array is fixed-size and persisted.
+  if (showDorisAggregationType.value) labels.push({ key: "dorisAggregationType", label: t("structureEditor.dorisAggregationType"), widthIndex: 6 });
   if (columnEditorControls.value.defaultValue) labels.push({ key: "defaultValue", label: t("structureEditor.defaultValue"), widthIndex: 6 });
   if (columnEditorControls.value.comment) labels.push({ key: "comment", label: t("structureEditor.comment"), widthIndex: 7 });
   if (showCharacterSet.value) labels.push({ key: "characterSet", label: t("structureEditor.characterSet"), widthIndex: 8 });
@@ -1399,6 +1415,8 @@ function createCurrentDraft(initialized = true): TableStructureEditorDraft {
     originalMysqlAutoIncrementValue: originalMysqlAutoIncrementValue.value,
     mysqlTableEngine: mysqlTableEngine.value,
     originalMysqlTableEngine: originalMysqlTableEngine.value,
+    dorisKeyModel: dorisKeyModel.value,
+    dorisReplicationNum: dorisReplicationNum.value,
     tableOwner: tableOwner.value,
     originalTableOwner: originalTableOwner.value,
     columns: cloneDraftValue(columns.value),
@@ -1442,6 +1460,8 @@ function restoreDraft(draft: TableStructureEditorDraft) {
   originalMysqlAutoIncrementValue.value = draft.originalMysqlAutoIncrementValue;
   mysqlTableEngine.value = draft.mysqlTableEngine || "";
   originalMysqlTableEngine.value = draft.originalMysqlTableEngine || "";
+  dorisKeyModel.value = normalizeDorisKeyModel(draft.dorisKeyModel);
+  dorisReplicationNum.value = String(draft.dorisReplicationNum ?? "");
   tableOwner.value = draft.tableOwner || "";
   originalTableOwner.value = draft.originalTableOwner || "";
   columns.value = cloneDraftValue(draft.columns || []);
@@ -1525,7 +1545,16 @@ function markDraftHydratedAndSync() {
 
 function hasPendingStructureChanges(): boolean {
   if (isCreateMode.value) {
-    return !!newTableName.value.trim() || !!tableComment.value.trim() || mysqlTableEngine.value !== originalMysqlTableEngine.value || columns.value.length > 0 || indexes.value.length > 0 || foreignKeys.value.length > 0 || triggers.value.length > 0;
+    return (
+      !!newTableName.value.trim() ||
+      !!tableComment.value.trim() ||
+      mysqlTableEngine.value !== originalMysqlTableEngine.value ||
+      (supportsDorisTableModel.value && (dorisKeyModel.value !== DORIS_DEFAULT_KEY_MODEL || !!String(dorisReplicationNum.value ?? "").trim())) ||
+      columns.value.length > 0 ||
+      indexes.value.length > 0 ||
+      foreignKeys.value.length > 0 ||
+      triggers.value.length > 0
+    );
   }
   const scope = captureStructureRefreshScope();
   return (
@@ -1681,7 +1710,8 @@ function structureChangeOptions(): BuildTableStructureChangeSqlOptions {
     tableName: isCreateMode.value ? newTableName.value.trim() : props.tableName || "",
     // Do not let a draft created by an older build submit properties that the
     // current database cannot represent (notably PostgreSQL-style identity on openGauss).
-    columns: showExtendedProperties.value ? columns.value : columns.value.map((column) => ({ ...column, extra: {} })),
+    // Doris keeps only the aggregation type its AGGREGATE KEY model needs.
+    columns: showExtendedProperties.value ? columns.value : columns.value.map((column) => ({ ...column, extra: showDorisAggregationType.value ? { dorisAggregationType: column.extra.dorisAggregationType } : {} })),
     indexes: sanitizeStructureIndexesForCapabilities(indexes.value, structureCapabilities.value),
     foreignKeys: foreignKeys.value,
     triggers: triggers.value,
@@ -1689,6 +1719,7 @@ function structureChangeOptions(): BuildTableStructureChangeSqlOptions {
     originalTableComment: isCreateMode.value ? undefined : originalTableComment.value,
     mysqlEngine: mysqlTableEngineSqlOption({ value: mysqlTableEngine.value, originalValue: originalMysqlTableEngine.value }, isCreateMode.value, supportsMysqlEngine.value && !mysqlTableEngineLoading.value && !mysqlTableEngineLoadError.value),
     tableCollation: mysqlTableDefaultCollation.value || undefined,
+    dorisTable: dorisTableSqlOption(dorisKeyModel.value, dorisReplicationNum.value, supportsDorisTableModel.value),
     partitioned: isPartitionedParent.value,
     isGaussdbMMode: connection.value?.driver_profile?.toLowerCase() === "gaussdb-m",
   };
@@ -1850,6 +1881,8 @@ function resetState() {
   mysqlTableEngineLoading.value = false;
   mysqlTableEngineLoadError.value = "";
   mysqlTableDefaultCollation.value = "";
+  dorisKeyModel.value = DORIS_DEFAULT_KEY_MODEL;
+  dorisReplicationNum.value = "";
   tableOwner.value = "";
   originalTableOwner.value = "";
   tableOwnerLoadRequestId += 1;
@@ -4089,6 +4122,8 @@ watch(
     mysqlTableEngineLoading,
     mysqlTableEngineLoadError,
     mysqlTableDefaultCollation,
+    dorisKeyModel,
+    dorisReplicationNum,
     tableOwner,
     ddlDraft,
     columns,
@@ -4254,6 +4289,30 @@ watch(
         </TooltipTrigger>
         <TooltipContent>{{ t("structureEditor.mysqlTableEngineLoadFailed", { message: mysqlTableEngineLoadError }) }}</TooltipContent>
       </Tooltip>
+    </div>
+
+    <div v-if="supportsDorisTableModel" class="flex shrink-0 items-center gap-2">
+      <label class="shrink-0 font-medium text-muted-foreground">{{ t("structureEditor.dorisTableModel") }}</label>
+      <Select :model-value="dorisKeyModel" :disabled="saving" @update:model-value="(v: any) => (dorisKeyModel = normalizeDorisKeyModel(String(v ?? '')))">
+        <SelectTrigger :class="[structureMonoControlClass, 'w-[180px]']" data-doris-key-model-select>
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem v-for="model in DORIS_KEY_MODELS" :key="model" :value="model">{{ model }} KEY</SelectItem>
+        </SelectContent>
+      </Select>
+      <label class="shrink-0 font-medium text-muted-foreground">{{ t("structureEditor.dorisReplicationNum") }}</label>
+      <Input
+        :model-value="dorisReplicationNum"
+        type="number"
+        min="1"
+        step="1"
+        :placeholder="t('structureEditor.dorisReplicationNumPlaceholder')"
+        :class="[structureMonoControlClass, 'w-[120px]']"
+        :disabled="saving"
+        data-doris-replication-num-input
+        @update:model-value="(v: any) => (dorisReplicationNum = String(v ?? ''))"
+      />
     </div>
 
     <div v-if="supportsTableOwner" class="flex shrink-0 items-center gap-2">
@@ -4613,6 +4672,16 @@ watch(
                         "
                       />
                     </td>
+                    <td v-if="showDorisAggregationType" :class="structureCellClass">
+                      <Select :model-value="column.extra.dorisAggregationType" :disabled="column.isPrimaryKey || column.markedForDrop" @update:model-value="(v: any) => (column.extra.dorisAggregationType = String(v ?? '') || undefined)">
+                        <SelectTrigger class="structure-grid-control h-[var(--structure-control-height)] w-full rounded-[6px] px-[var(--structure-control-px)] font-mono text-[length:var(--structure-font-size)] focus-visible:border-ring/50 focus-visible:ring-1 focus-visible:ring-ring/25">
+                          <SelectValue :placeholder="t('structureEditor.dorisAggregationTypePlaceholder')" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem v-for="opt in DORIS_AGGREGATION_TYPES" :key="opt" :value="opt">{{ opt }}</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </td>
                     <td v-if="columnEditorControls.defaultValue" :class="structureCellClass">
                       <div class="flex min-w-0 items-center gap-1">
                         <Input v-model="column.defaultValue" :class="[structureMonoControlClass, 'flex-1']" :disabled="isColumnDefaultDisabled(column)" />
@@ -4930,7 +4999,7 @@ watch(
                     </label>
                   </td>
                   <td :class="structureCellClass">
-                    <Select v-if="indexTypeOptions.length > 0" :model-value="index.indexType || 'BTREE'" :disabled="!canEditIndexDraft(index)" @update:model-value="(v: any) => (index.indexType = String(v ?? ''))">
+                    <Select v-if="indexTypeOptions.length > 0" :model-value="index.indexType || defaultIndexTypeOption" :disabled="!canEditIndexDraft(index)" @update:model-value="(v: any) => (index.indexType = String(v ?? ''))">
                       <SelectTrigger class="structure-grid-control h-[var(--structure-control-height)] w-full rounded-[6px] px-[var(--structure-control-px)] font-mono text-[length:var(--structure-font-size)] focus-visible:border-ring/50 focus-visible:ring-1 focus-visible:ring-ring/25">
                         <SelectValue />
                       </SelectTrigger>

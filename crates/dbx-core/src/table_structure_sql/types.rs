@@ -44,6 +44,10 @@ pub struct ColumnExtra {
     pub manticore_stored: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub manticore_attribute: Option<bool>,
+    /// Doris AGGREGATE KEY tables: aggregation type of a value column
+    /// (`SUM`, `MAX`, `MIN`, `REPLACE`, ...). Ignored by every other dialect.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub doris_aggregation_type: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub manticore_secondary_index: Option<bool>,
 }
@@ -256,6 +260,22 @@ pub struct TableStructureSqlOptions {
     /// `StructureDialect::Mysql` so that DDL is generated with MySQL syntax.
     #[serde(default)]
     pub is_gaussdb_m_mode: bool,
+    /// Doris only: table model (`DUPLICATE` / `UNIQUE` / `AGGREGATE` KEY) and
+    /// storage properties for `CREATE TABLE`. Ignored by every other dialect.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub doris_table: Option<DorisTableOptions>,
+}
+
+/// Doris table model and storage properties chosen while creating a table.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DorisTableOptions {
+    /// `DUPLICATE`, `UNIQUE` or `AGGREGATE` (case-insensitive); empty means DUPLICATE.
+    #[serde(default)]
+    pub key_model: String,
+    /// `PROPERTIES ("replication_num" = "n")`; `None` keeps the cluster default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub replication_num: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

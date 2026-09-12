@@ -2,8 +2,12 @@ dialect:
   name: "Doris"
   display_name: "Apache Doris"
   versions:
-    - version: "2.1"
+    - version: "4.0"
       status: "RECOMMENDED"
+    - version: "3.0"
+      status: "COMPATIBLE"
+    - version: "2.1"
+      status: "COMPATIBLE"
 
 types:
   - name: "TINYINT"
@@ -24,6 +28,7 @@ types:
   - name: "DECIMAL"
     category: "DECIMAL"
     has_precision: true
+    max_precision: 38
   - name: "VARCHAR"
     category: "STRING"
     has_length: true
@@ -38,6 +43,12 @@ types:
     category: "STRING"
   - name: "BOOLEAN"
     category: "BOOLEAN"
+  - name: "IPV4"
+    category: "NETWORK"
+    semantic_fidelity_base: 0.3
+  - name: "IPV6"
+    category: "NETWORK"
+    semantic_fidelity_base: 0.3
   - name: "DATE"
     category: "DATE"
   - name: "DATETIME"
@@ -47,6 +58,9 @@ types:
     semantic_fidelity_base: 0.5
   - name: "JSON"
     category: "JSON"
+  - name: "VARIANT"
+    category: "JSON"
+    semantic_fidelity_base: 0.7
   - name: "MAP"
     category: "MAP"
     semantic_fidelity_base: 0.4
@@ -83,7 +97,7 @@ ddl_capabilities:
     modify_column: "ALTER TABLE {table} MODIFY COLUMN {column} {type}"
     create_table: "CREATE TABLE IF NOT EXISTS {table} ({columns})"
     drop_table: "DROP TABLE IF EXISTS {table}"
-    create_index: "CREATE INDEX {name} ON {table} ({columns}) USING BITMAP"
+    create_index: "CREATE INDEX {name} ON {table} ({columns}) USING INVERTED"
     drop_index: "DROP INDEX {name} ON {table}"
 
 rollback_templates:

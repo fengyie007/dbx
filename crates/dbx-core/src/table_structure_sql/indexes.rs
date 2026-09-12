@@ -263,6 +263,15 @@ pub(super) fn mysql_index_parts(index_type: &str) -> (String, String) {
     }
 }
 
+/// Doris secondary indexes are not B-trees: these are the only `USING` kinds
+/// (`ANN` is the Doris 4.0 vector index). Anything else — typically `BTREE`
+/// carried over from a MySQL draft — is dropped so the server default applies.
+const DORIS_INDEX_TYPES: &[&str] = &["INVERTED", "NGRAM_BF", "BITMAP", "ANN"];
+
+fn doris_index_using_clause(index_type: &str) -> Option<String> {
+    DORIS_INDEX_TYPES.contains(&index_type).then(|| format!(" USING {index_type}"))
+}
+
 fn gaussdbm_index_parts(index_type: &str) -> (String, String) {
     match index_type.to_ascii_uppercase().as_str() {
         "BTREE" | "UBTREE" => (String::new(), " USING UBTREE".to_string()),
@@ -403,7 +412,8 @@ pub(super) fn build_drop_index_sql(
     if database_type == Some(DatabaseType::Iris) {
         return format!("DROP INDEX {} ON TABLE {table};", quote_ident(dialect, index_name));
     }
-    if matches!(dialect, StructureDialect::Mysql | StructureDialect::SqlServer) {
+    // Doris shares MySQL's table-scoped `DROP INDEX ... ON` grammar.
+    if matches!(dialect, StructureDialect::Mysql | StructureDialect::SqlServer | StructureDialect::Doris) {
         return format!("DROP INDEX {} ON {table};", quote_ident(dialect, index_name));
     }
     if matches!(
@@ -449,7 +459,14 @@ pub(super) fn build_create_index_statements(
     // before any statement is built — this function never downgrades them.
     let concurrently = index.concurrently && concurrently_supported && dialect == StructureDialect::Postgres;
 
-    let unique = if index.is_unique { "UNIQUE " } else { "" };
+    // Doris has no `CREATE UNIQUE INDEX`: uniqueness comes from the UNIQUE KEY table
+    // model, so a unique request degrades to a regular index with a warning.
+    if index.is_unique && dialect == StructureDialect::Doris {
+        warnings.push(format!(
+            "Doris does not support unique indexes; index \"{name}\" is created as a regular index (use a UNIQUE KEY table model for uniqueness)."
+        ));
+    }
+    let unique = if index.is_unique && dialect != StructureDialect::Doris { "UNIQUE " } else { "" };
     let replace = if or_replace { "OR REPLACE " } else { "" };
     let key_is_expression = key_expression_flags(index, &columns);
     let key_opclasses = key_opclasses(index, &columns);
@@ -492,6 +509,12 @@ pub(super) fn build_create_index_statements(
                 type_prefix = prefix;
                 using_clause = using;
             }
+            StructureDialect::Doris => match doris_index_using_clause(&idx_type) {
+                Some(using) => using_clause = using,
+                None => warnings.push(format!(
+                    "Index type \"{idx_type}\" is not supported for Doris; index \"{name}\" uses the server default index type."
+                )),
+            },
             _ => {}
         }
     }
@@ -522,7 +545,7 @@ pub(super) fn build_create_index_statements(
     let comment = clean(&index.comment);
     let comment_clause = if !comment.is_empty()
         && capabilities.index_comment
-        && matches!(dialect, StructureDialect::Mysql | StructureDialect::GaussdbM)
+        && matches!(dialect, StructureDialect::Mysql | StructureDialect::GaussdbM | StructureDialect::Doris)
     {
         format!(" COMMENT {}", quote_string(&comment))
     } else {
@@ -548,6 +571,10 @@ pub(super) fn build_create_index_statements(
         format!(
             "CREATE {replace}{unique}INDEX {concurrent_clause}{index_name} ON {create_table}{using_clause} ({cols}){include_clause}{where_clause};"
         )
+    } else if dialect == StructureDialect::Doris {
+        // Doris grammar puts the index kind after the column list:
+        // `CREATE INDEX idx ON t (c) USING INVERTED COMMENT '...'`.
+        format!("CREATE INDEX {index_name} ON {create_table} ({cols}){using_clause}{comment_clause};")
     } else {
         format!(
             "CREATE {replace}{unique}{type_prefix}INDEX {index_name}{using_clause} ON {create_table} ({cols}){include_clause}{where_clause}{comment_clause};"
@@ -561,7 +588,7 @@ pub(super) fn build_create_index_statements(
         statements.extend(build_sqlserver_index_comment_sql(table, schema, table_name, &name, &comment));
     } else if !comment.is_empty()
         && capabilities.index_comment
-        && matches!(dialect, StructureDialect::Mysql | StructureDialect::GaussdbM)
+        && matches!(dialect, StructureDialect::Mysql | StructureDialect::GaussdbM | StructureDialect::Doris)
     {
         // Comment is embedded inline in the CREATE INDEX statement above
     } else if !comment.is_empty() && capabilities.index_comment {

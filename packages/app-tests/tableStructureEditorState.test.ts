@@ -507,8 +507,20 @@ test("normalizes temporal precision when combining data types", () => {
 
 test("returns data type options for compatible table structure editors", () => {
   assert.deepEqual(getDataTypeOptions("gaussdb"), getDataTypeOptions("postgres"));
-  assert.deepEqual(getDataTypeOptions("doris"), getDataTypeOptions("mysql"));
+  assert.deepEqual(getDataTypeOptions("starrocks"), getDataTypeOptions("mysql"));
   assert.equal(getDataTypeOptions("sqlserver").includes("nvarchar"), true);
+});
+
+test("returns Doris OLAP data types instead of the MySQL list", () => {
+  const options = getDataTypeOptions("doris");
+
+  assert.notDeepEqual(options, getDataTypeOptions("mysql"));
+  for (const type of ["largeint", "string", "variant", "ipv4", "ipv6", "array", "map", "struct", "bitmap", "hll", "quantile_state", "decimal", "datetime", "varchar"]) {
+    assert.ok(options.includes(type), `expected Doris type ${type}`);
+  }
+  for (const type of ["mediumint", "enum", "set", "timestamp", "year", "tinytext", "blob", "geometry"]) {
+    assert.equal(options.includes(type), false, `unexpected MySQL-only type ${type}`);
+  }
 });
 
 test("returns the complete Dameng fallback data type options", () => {

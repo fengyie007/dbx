@@ -113,6 +113,10 @@ export const DATA_TYPE_OPTIONS: Record<string, string[]> = {
     "multipolygon",
     "geometrycollection",
   ],
+  // Apache Doris (2.1 – 4.x) is an OLAP engine, not MySQL: no blob/enum/set/year
+  // types, but LARGEINT/STRING, semi-structured VARIANT, IPV4/IPV6, nested
+  // ARRAY/MAP/STRUCT and the aggregate-state types BITMAP/HLL/QUANTILE_STATE.
+  doris: ["boolean", "tinyint", "smallint", "int", "bigint", "largeint", "float", "double", "decimal", "date", "datetime", "char", "varchar", "string", "text", "json", "variant", "array", "map", "struct", "ipv4", "ipv6", "bitmap", "hll", "quantile_state"],
   postgres: withPostgresArrayTypes([
     "smallint",
     "int2",
@@ -446,7 +450,6 @@ export const DATA_TYPE_OPTIONS: Record<string, string[]> = {
 };
 
 const DATA_TYPE_OPTION_ALIASES: Partial<Record<DatabaseType, string>> = {
-  doris: "mysql",
   starrocks: "mysql",
   goldendb: "mysql",
   sundb: "mysql",

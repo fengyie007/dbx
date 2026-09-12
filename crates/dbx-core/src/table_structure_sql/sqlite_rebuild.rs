@@ -1520,6 +1520,7 @@ mod tests {
             mysql_engine: None,
             partitioned: false,
             is_gaussdb_m_mode: false,
+            doris_table: None,
             table_collation: None,
         }
     }

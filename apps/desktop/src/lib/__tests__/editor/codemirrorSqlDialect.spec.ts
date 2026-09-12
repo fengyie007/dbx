@@ -45,6 +45,23 @@ describe("codemirrorSqlDialect", () => {
     expect(mysqlBuiltins.has("dolt_branch")).toBe(false);
   });
 
+  it("adds Doris 4.x vocabulary on top of the MySQL dialect without changing MySQL", () => {
+    const doris = createDbxCodeMirrorSqlDialect(langSql, "mysql", "doris");
+    const mysql = createDbxCodeMirrorSqlDialect(langSql, "mysql", "mysql");
+
+    expect(nodeNameAt(doris, "SELECT * FROM docs WHERE SEARCH('title:doris')", "SEARCH")).toBe("Builtin");
+    expect(nodeNameAt(doris, "SELECT l2_distance_approximate(embedding, q) FROM docs", "l2_distance_approximate")).toBe("Builtin");
+    expect(nodeNameAt(doris, "SELECT AI_SUMMARIZE(body) FROM docs", "AI_SUMMARIZE")).toBe("Builtin");
+    expect(nodeNameAt(doris, "CREATE TABLE t (v VARIANT, ip IPV4)", "VARIANT")).toBe("Type");
+    expect(nodeNameAt(doris, "CREATE TABLE t (v VARIANT, ip IPV4)", "IPV4")).toBe("Type");
+    expect(nodeNameAt(doris, "SELECT * FROM t WHERE title MATCH_ANY 'doris'", "MATCH_ANY")).toBe("Keyword");
+    expect(nodeNameAt(doris, "SWITCH hive_catalog", "SWITCH")).toBe("Keyword");
+
+    expect(nodeNameAt(mysql, "SELECT AI_SUMMARIZE(body) FROM docs", "AI_SUMMARIZE")).toBe("Identifier");
+    expect(nodeNameAt(mysql, "CREATE TABLE t (v VARIANT)", "VARIANT")).toBe("Identifier");
+    expect(nodeNameAt(mysql, "SWITCH hive_catalog", "SWITCH")).toBe("Identifier");
+  });
+
   it("highlights SQL Server clause words as keywords instead of builtin functions", () => {
     const builtins = new Set(sqlServerBuiltinSyntaxTerms(langSql.MSSQL.spec.builtin || "").split(/\s+/));
 

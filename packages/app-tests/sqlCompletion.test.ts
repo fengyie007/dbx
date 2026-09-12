@@ -555,6 +555,30 @@ test("suggests Manticore Search SQL functions and command snippets", () => {
   assert.ok(rankingItems.some((item) => item.type === "function" && item.label === "BM25F"));
 });
 
+test("suggests Doris 4.x functions and catalog keywords on top of the MySQL vocabulary", () => {
+  const doris = { tables, columnsByTable, databaseType: "doris" as const };
+  const searchItems = buildSqlCompletionItems("select * from products where sear", "select * from products where sear".length, doris);
+  const vectorItems = buildSqlCompletionItems("select l2_dist", "select l2_dist".length, doris);
+  const aiItems = buildSqlCompletionItems("select ai_sum", "select ai_sum".length, doris);
+  const bitmapItems = buildSqlCompletionItems("select bitmap_uni", "select bitmap_uni".length, doris);
+  const switchItems = buildSqlCompletionItems("swi", "swi".length, doris);
+
+  assert.ok(searchItems.some((item) => item.type === "function" && item.label === "SEARCH"));
+  assert.ok(vectorItems.some((item) => item.type === "function" && item.label === "L2_DISTANCE_APPROXIMATE"));
+  assert.ok(aiItems.some((item) => item.type === "function" && item.label === "AI_SUMMARIZE"));
+  assert.ok(bitmapItems.some((item) => item.type === "function" && item.label === "BITMAP_UNION_COUNT"));
+  assert.ok(switchItems.some((item) => item.type === "keyword" && item.label === "SWITCH"));
+  assert.deepEqual(getSqlFunctionSignatureHelp("select search(", "select search(".length, "doris")?.parameters, ["dsl"]);
+  assert.deepEqual(getSqlFunctionSignatureHelp("select ai_translate(", "select ai_translate(".length, "doris")?.parameters, ["text", "language"]);
+
+  // Doris keeps the MySQL function surface; MySQL does not gain Doris functions.
+  assert.deepEqual(getSqlFunctionSignatureHelp("select group_concat(", "select group_concat(".length, "doris")?.parameters, ["expression"]);
+  assert.equal(
+    buildSqlCompletionItems("select ai_sum", "select ai_sum".length, { tables, columnsByTable, databaseType: "mysql" }).some((item) => item.label === "AI_SUMMARIZE"),
+    false,
+  );
+});
+
 test("MongoDB completion avoids SQL keywords", () => {
   const items = buildSqlCompletionItems("fi", 2, {
     tables: [],
